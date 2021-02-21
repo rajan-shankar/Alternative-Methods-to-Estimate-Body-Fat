@@ -1,0 +1,176 @@
+---
+title: "Code from slides"
+author: '490300286'
+date: "17/11/2020"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(icon)
+library(sjPlot)
+
+dat = read_csv("body_fat.csv") %>% select(-density, -waist)
+```
+
+
+# Part 2: Analysis
+
+
+
+# Analysis: Initial Assumptions
+
+
+```{r fig.width=12, fig.height=10}
+dat_long = dat %>% pivot_longer(-pct_bf, names_to = "measure")
+
+p = ggplot(dat_long, aes(x = value, y = pct_bf)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ measure, scales = "free_x", ncol = 4) +
+  labs(title = "Scatter Plots of Response vs. Predictors") +
+  theme_bw()
+
+
+suppressMessages(ggsave("densities.pdf", p, scale = 0.5))
+```
+
+# Analysis: Model Exploration
+
+## Step-wise search
+
+```{r}
+M_null = lm(pct_bf ~ 1, dat)
+M_full = lm(pct_bf ~ ., dat)
+```
+
+```{r}
+M_back = step(M_full, direction = "backward", trace = FALSE)
+M_back = update(M_back, . ~ . -hip -thigh -forearm -neck)
+
+tab_model(M_back, show.ci = FALSE, title = "Backward Search")
+```
+
+```{r}
+M_forw = step(M_null, scope = list(lower = M_null, upper = M_full), direction = "forward", trace = FALSE)
+M_forw = update(M_forw, . ~ . -thigh -age -bicep)
+
+tab_model(M_forw, show.ci = FALSE, title = "Forward Search")
+```
+
+
+# Analysis: Model Exploration
+
+## Stability analysis
+
+```{r results='asis', eval=TRUE}
+library(mplot)
+
+stability_vis = vis(M_full, seed = 1)
+vip = plot(stability_vis, which = "vip", interactive = F, tag = "chart")
+
+ggsave("VIP.pdf", vip, width = 5, height = 3, units = "cm", scale = 4)
+
+
+```
+
+# Analysis: Model Exploration
+
+## Stability analysis
+
+```{r results='asis', eval=TRUE}
+bootplot = plot(stability_vis, which = "boot", highlight = "weight", interactive = F, tag = "chart")
+
+suppressMessages(ggsave("bootplot.pdf", bootplot, width = 5, height = 3, units = "cm", scale = 4))
+
+```
+
+
+# Analysis: Model Exploration
+
+
+```{r}
+M_ab = lm(pct_bf ~ abdomen, dat)
+tab_model(M_ab, show.ci = FALSE, title = "Abdomen")
+```
+
+```{r}
+M_abwt = lm(pct_bf ~ abdomen + weight, dat)
+final_model = tab_model(M_abwt, show.ci = FALSE, title = "Abdomen + Weight")
+
+x = as_tibble(summary(M_abwt))
+
+stargazer(M_abwt, title="Results", align=TRUE)
+
+
+class(final_model)
+
+as.table(final_model)
+```
+
+
+# Analysis: Cross-validation 
+
+
+```{r eval=TRUE}
+library(caret)
+set.seed(1)
+params = trainControl(method = "repeatedcv", number = 10, repeats = 10, verboseIter = FALSE, allowParallel = FALSE)
+
+cv_objects = list(
+  M_back = train(pct_bf ~ age + height + abdomen + wrist, method = "lm", data = dat, trControl = params),
+  M_forw = train(pct_bf ~ abdomen + weight + wrist,       method = "lm", data = dat, trControl = params),
+  M_ab   = train(pct_bf ~ abdomen,                        method = "lm", data = dat, trControl = params),
+  M_abwt = train(pct_bf ~ abdomen + weight,               method = "lm", data = dat, trControl = params)
+)
+
+cv_results = resamples(cv_objects)
+cvplot = ggplot(cv_results) +
+  labs(x = "Models", y = "Mean Absolute Error (MAE)", title = "10-Fold CV Performance") +
+  theme_bw()
+
+suppressMessages(ggsave("cvplot.pdf", cvplot, width = , height = 4, units = "cm", scale = 4))
+```
+
+
+
+# homoskedasticity
+
+```{r, fig.height=3, fig.width=5}
+library(ggfortify)
+autoplot(M_abwt, which = 1, ncol = 1) + theme_bw()
+
+```
+
+# normality
+
+```{r, fig.height=3, fig.width=5}
+autoplot(M_abwt, which = 2, ncol = 1) + theme_bw()
+```
+
+# homoskedasticity and normality
+
+```{r}
+autoplot(M_abwt, which = 1:2, ncol = 1) + theme_bw()
+ggsave("homoskedasticity_and_qqplot.pdf", autoplot(M_abwt, which = 1:2, ncol = 1) + theme_bw(), width = 4, height = 4, units = "cm", scale = 4)
+```
+
+
+# Results
+
+$$\widehat{\text{pct_bf}} = -47.45 + 0.98\ \text{abdomen} - 0.29\ \text{weight}$$
+
+
+```{r}
+tab_model(M_abwt, show.ci = FALSE, title = "Abdomen + Weight")
+```
+
